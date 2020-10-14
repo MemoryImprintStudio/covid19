@@ -1,0 +1,1101 @@
+---
+title: "Covid-19 Analysis"
+author: "Y. Tan"
+date: "Mar 10, 2020"
+documentclass: ctexart
+geometry: "left=3cm,right=3cm,top=3cm,bottom=3cm"
+header-includes:
+  - \usepackage{mychinesefont}
+  output:
+    pdf_document:
+      #template: ../my_template.tex  #prevent the lulatex junk in tex file
+      includes:
+        in_header: ../header.tex
+        toc: yes
+        pandoc_args: --number-sections
+        word_document:
+          toc: yes
+---
+        
+```{r global_options, include=F}
+    knitr::opts_chunk$set(fig.path='./figures/',fig.width = 8,
+                          echo=T, warning=FALSE, message=FALSE,comment = NA, 
+                          tidy.opts=list(width.cutoff=80),tidy=TRUE)
+```
+    
+```{r, include=FALSE}
+    library(lubridate)
+    library(magrittr)
+    library(tidyverse)
+    library(gridExtra)
+    library(dplyr)
+    library(ggmap)
+    library(maps)
+    library(mapdata) 
+    library(viridis)
+    library(googleVis)
+    library(ggforce)
+    library(gganimate)
+    library(kableExtra)
+    library(showtext)
+    showtext_auto()
+```
+  
+        
+```{r theme}
+    theme_tan <- theme_classic() +
+        theme(##plot.title=element_text(margin = margin(b=20,t=10),size=rel(1.4)),
+            plot.title=element_blank(), ## remove plot title for report
+            axis.title.x=element_text(margin = margin(b=10,t=10),size=rel(1.2)),
+            axis.title.y=element_text(margin = margin(0, 10, 0, 0),size=rel(1.2)),
+            axis.text.x = element_text(margin = margin(10, 0, 0, 0)),
+            ##axis.text.x = element_text(margin = margin(10, 0, 0, 0)),
+            legend.background = element_rect(##fill = "lemonchiffon",
+                color = "grey50",
+                size = 0.3,
+                linetype = "solid")
+        )
+
+    theme_bw_tan <- theme_bw() +
+        theme(##plot.title=element_text(margin = margin(5, 0, 15, 0),size=rel(1.4)),
+            plot.title=element_blank(), ## remove plot title for report 
+            axis.title.x=element_text(margin = margin(10, 0, 0, 0),size=rel(1.2)),
+            axis.title.y=element_text(margin = margin(0, 10, 0, 0),size=rel(1.2)),
+            axis.text.x = element_text(margin = margin(10, 0, 0, 0)),
+            ##axis.text.x = element_text(margin = margin(10, 0, 0, 0)),
+            legend.background = element_rect(##fill = "lemonchiffon",
+                color = "grey50",
+                size = 0.3,
+                linetype = "solid")
+        )
+    theme_update(plot.title = element_text(hjust = 0.5))
+```
+
+# Introduction
+
+This is an analysis report of the Novel Coronavirus (COVID-19) around the world, to demonstrate data
+  processing and visualisation with R, tidyverse and ggplot2. This report will be updated from time to time,
+  with new data and more analysis. Please find its latest version at http://www.rdatamining.com/docs/
+  Coronavirus-data-analysis-world.pdf.
+
+    I have also writen a similar report for COVID-19 in China only. If you are particually inter-
+    ested what has happened in China, please find that report at http://www.rdatamining.com/docs/
+    Coronavirus-data-analysis-china.pdf.
+
+##  Data Source
+
+    The data source used for this analysis is the 2019 Novel Coronavirus COVID-19 (2019-nCoV) Data Repository1 built the Center for Systems Science and Engineering, Johns Hopkins University.
+        
+    Field description:
+        1. Province/State: China - province name; US/Canada/Australia/ - city name, state/province name; Others - name of the event (e.g., "Diamond Princess" cruise ship); other countries - blank.
+        1. Country/Region: country/region name conforming to WHO (will be updated).
+        1. Last Update: MM/DD/YYYY HH:mm (24 hour format, in UTC).
+        1. Confirmed: the number of confirmed cases. For Hubei Province: from Feb 13 (GMT +8), we report both clinically diagnosed and lab-confirmed cases. For lab-confirmed cases only (Before Feb 17), please refer to who_covid_19_situation_reports. For Italy, diagnosis standard might be changed since Feb 27 to "slow the growth of new case numbers." (Source)
+        1. Deaths: the number of deaths.
+        1. Recovered: the number of recovered cases.
+
+    Time series summary (csse_covid_19_time_series)
+
+    This folder contains daily time series summary tables, including confirmed, deaths and recovered. All data are from the daily case report.
+    Field descriptioin
+
+Province/State: same as above.
+Country/Region: same as above.
+Lat and Long: a coordinates reference for the user.
+Date fields: M/DD/YYYY (UTC), the same data as MM-DD-YYYY.csv file.
+
+## R Packages
+
+    Blow is a list of R packages used for this analysis. Package magrittr is for pipe operations like  %>% and %<>%  and lubridate for date operations. Package tidyverse is a collection of R packages for data science, including dplyr and tidyr for data processing and ggplot2 for graphics. Package gridExtra is for arranging multiple grid-based plots on a page and kableExtra works together with kable() from knitr to build complex HTML or LaTeX tables.
+
+# Loading Data
+
+At first, the datasets, which are three CSV files, are downloaded and saved as local files, and then are loaded into R.
+
+
+```{r tidy.opts=list(width.cutoff=60)}
+  # as of 03-26-2010, the dataset changed its format, following code is not working anymore. 
+  # the new data base is generated with python dataflows https://github.com/datasets/covid-19
+  # source data files
+  filenames <- c('time_series_covid19_confirmed_global.csv',
+                 'time_series_covid19_deaths_global.csv',
+                 'time_series_covid19_recovered_global.csv',
+                 'time_series_covid19_confirmed_US.csv',
+                 'time_series_covid19_deaths_US.csv')
+  url.path <- 'https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series'
+  ## download files to local
+  download <- function(filename) {
+      url <- file.path(url.path, filename)
+      dest <- file.path('./data', filename)
+      download.file(url, dest)
+    }
+  bin <- lapply(filenames, download)
+  # load data into R
+  data.confirmed.us<-read.csv('./data/time_series_covid19_confirmed_US.csv')
+  data.deaths.us<-read.csv('./data/time_series_covid19_deaths_US.csv')
+  # data.confirmed <- read.csv('./data/time_series_19-covid-Confirmed.csv')
+  data.deaths.world<-read.csv('./data/time_series_covid19_deaths_global.csv')
+  data.recovered.world<-read.csv('./data/time_series_covid19_recovered_global.csv')
+  data.confirmed.world <- read.csv('./data/time_series_covid19_confirmed_global.csv')
+  data.confirmed.world_orig <- data.confirmed.world
+```
+    
+Each dataset has `r dim(data.confirmed.us)[1]` rows, corresponding to country/region/province/state. It has `r dim(data.confirmed.us)[2]` columns. Starting from column 5, each column corresponds to a single day. Here we draw a random sample of 10 rows and have a look at their first 10 columns.
+    
+```{r}
+data_usa <-data.confirmed.us # %>% filter(Country.Region=='US')
+# data.confirmed.orig_us <- data.confirmed.us
+# data.confirmed.us[,1:10] %>%
+#   sample_n(10) %>%
+#       kable("latex", booktabs=T, caption="Raw Data (Confirmed, First 10 Columns only)") %>%
+#         kable_styling(font_size=6, latex_options = c("striped", "hold_position", "repeat_header"))
+```
+    
+
+Below we check the time frame of the data.
+
+```{r}
+n.col <- ncol(data.confirmed.us)
+## get dates from column names
+dates <- names(data.confirmed.us)[13:n.col] %>% substr(2,8) %>% mdy()
+range(dates)
+
+```
+```{r}
+max.date <- max(dates)
+min.date <- min(dates)
+```
+
+It shows that the data was last updated on `r max.date`.
+
+#  Data Preparation
+
+## Globale Data Cleaning
+
+The three datesets are converted from wide to long format, and then are aggregated by country. After that,
+they are merged into one single dataset.
+
+```{r}
+## data cleaning and transformation
+cleanData <- function(data) {
+    # remove some columns
+    data %<>% select(-c(Province.State, Lat, Long)) %>% rename(country=Country.Region)
+    ## convert from wide to long format
+    data %<>% gather(key=date, value=count, -country)
+    ## convert from character to date
+    data %<>% mutate(date = date %>% substr(2,8) %>% mdy())
+    ## aggregate by country
+    data %<>% group_by(country, date) %>% summarise(count=sum(count)) %>% as.data.frame()
+    return(data)
+}
+## clean the three datasets
+data.confirmed.world %<>% cleanData() %>% rename(confirmed=count)
+data.deaths.world %<>% cleanData() %>% rename(deaths=count)
+data.recovered.world %<>% cleanData() %>% rename(recovered=count)
+# merge above 3 datasets into one, by country and date
+data <- data.confirmed.world %>% merge(data.deaths.world) %>% merge(data.recovered.world)
+# first 10 records when it first broke out in China
+                                        # data %>% filter(country=='China') %>% head(10) %>%
+                                        # kable("latex", booktabs=T, caption="Raw Data (with first 10 Columns Only)",
+#     format.args=list(big.mark=",")) %>%
+#     kable_styling(latex_options = c("striped", "hold_position", "repeat_header"))
+
+```
+
+
+# Distribution
+
+## Top States Ranking
+
+```{r state_ranking}
+dt_us_rank <- data_usa %>% select(-c(UID,iso2,iso3,code3,FIPS,Admin2,Country_Region,Lat,Long_,Combined_Key))  %>% 
+    # filter(!str_detect(Province.State, "\\,")) %>%  # remove city data https://github.com/CSSEGISandData/COVID-19/issues/817
+    # mutate(Province.State = toupper(str_extract(Province.State,  '\\b[^,]+$')))  %>%  # Extract the state    str_extract(s, '\\S+$')
+    # filter(Province.State!="C.") %>%
+    gather(key=date, value=count, -Province_State) %>%
+    group_by(Province_State) %>% summarise(confirmed=sum(count)) %>%
+    select(c(Province_State, confirmed)) %>%
+    group_by(Province_State) %>% 
+    summarise(confirmed = sum(confirmed)) %>%
+    mutate(ranking = dense_rank(desc(confirmed))) 
+
+
+top_state <- dt_us_rank %>% 
+    filter(ranking <= 10) %>%
+    arrange(ranking) %>% pull(Province_State) %>% as.character() %>% 
+    setdiff('Others') %>% c('Others')
+## move 'Others' to the end
+#top.countries %<>% setdiff('Others') %>% c('Others')
+top_state
+```
+
+## US Pie Chart
+
+```{r pietu, dev="png", dpi=400}
+dt_us_top <- dt_us_rank %>% mutate(Province_State=ifelse(ranking <= 10, as.character(Province_State), 'Others')) %>%
+    mutate(Province_State=Province_State %>% factor(levels=c(top_state)))
+
+dt_us_top %<>% group_by(Province_State) %>% summarise(confirmed=sum(confirmed))
+# precentage and label
+dt_us_top %<>% mutate(per = (100*confirmed/sum(confirmed)) %>% round(1)) %>%
+    mutate(txt = paste0(Province_State, ': ', confirmed, ' (', per, '%)'))
+
+dt_us_top %>% 
+    ggplot(aes(fill=Province_State)) +
+    geom_bar(aes(x='', y=per), stat='identity') +
+    coord_polar("y", start=0) +
+    xlab('') + ylab('Percentage (%)') +
+    labs(title=paste0('美国新冠病毒确诊人数前10名州 (更新至', max.date, ')')) +
+  　scale_fill_brewer(palette="Spectral",name='State', labels=dt_us_top$txt) +
+    theme_bw_tan +
+    theme(
+        text = element_text(color = "#22211d"),
+        plot.title = element_text(size= 16, hjust=-0.2, color = "#4e4d47", margin = margin(b = 0.4 , t = 0.4, l = 2, unit = "cm")),
+    )
+```
+
+## Pie Chart with Plotly
+
+```{r}
+library(plotly)
+df <- data.frame(Gruppierung = c("Very long label", "Very very long label", "Long label", "Short label", "Long label / long label"), 
+                     freq = c(3.1, 6.2, 8.7, 20, 21))
+plot_ly(df, labels=~Gruppierung,values=~freq, marker = list(line = list(color = '#FFFFFF', width = 1)), type="pie",
+    textposition = ifelse(df$freq<5,"outside","inside"),textinfo = 'text',
+    hoverinfo = 'text',source = "subset",
+    text=~paste(sub(" ","<br>",Gruppierung),":","<br>",paste0(freq,"#") ),
+    insidetextfont = list(color = '#FFFFFF')) %>%
+    layout(showlegend = FALSE,separators = ',.') %>% config(displayModeBar = F)
+```
+
+
+
+```{r}
+library(plotly)
+
+p <- plot_ly(dt_us_top, 
+             labels = ~Province_State, 
+             values = ~per, 
+             type = 'pie',
+             ## label outside if per < 10% 
+             textposition = ifelse(dt_us_top$per<12,"outside","inside"),
+             textinfo = 'text',
+             hoverinfo = 'text',source = "subset",
+             marker = list(line = list(color = '#FFFFFF', width = 1)),
+             ## txt=dt_us_top$txt
+             text=~paste(Province_State,":",paste0(per,"%")),
+             ## text=~paste(txt),
+             ## inside label color to white
+             insidetextfont = list(color = '#FFFFFF')
+             ) %>%
+  layout(title = paste0('美国新冠病毒确诊人数前10名州 (更新至', max.date, ')'),
+         xaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
+         yaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
+         margin = list(b = 80,t=80)
+         ) %>%
+  layout(showlegend = FALSE,separators = ',.') %>% config(displayModeBar = F)
+
+p
+```
+## US Population by State
+
+```{r us_pop, dev="png", dpi=400}
+library(choroplethr)
+library(plotly)
+data(df_pop_state)
+
+## capitalize the first letter
+df_pop_state[,1] = tools::toTitleCase(df_pop_state[,1])
+
+## pie chart plot with plotly
+plot_ly(df_pop_state, 
+             labels = ~region, 
+             values = ~value, 
+             type = 'pie',
+             ## label outside if per < 10% 
+             textposition = "outside", #ifelse(dt_us_top$value<12,"outside","inside"),
+             textinfo = 'text',
+             hoverinfo = 'text',source = "subset",
+             marker = list(line = list(color = '#FFFFFF', width = 1)),
+             ## txt=dt_us_top$txt
+             text=~paste(region,":",value),
+             ## text=~paste(txt),
+             ## inside label color to white
+             insidetextfont = list(color = '#FFFFFF'),width=1100, height=1000
+             ) %>%
+  layout(title = "US Population by States",
+         xaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
+         yaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
+         margin = list(b = 80,t=200)
+         ) %>%
+  layout(showlegend = FALSE,separators = ',.') %>% config(displayModeBar = F)
+```
+
+
+## US Map
+
+```{r usa, dev="png", dpi=400}
+# Get the world polygon and extract US
+n.col <- ncol(data_usa)
+
+# Create breaks for the color scale
+# mybreaks <- c(2, 10, 40, 100)
+states <- map_data("state")
+
+dt1 <- data_usa %>% select(-c(UID,iso2,iso3,code3,FIPS,Admin2,Country_Region,Combined_Key))  %>% 
+    # filter(!str_detect(Province.State, "\\,")) %>%  # if want to include city data
+    # mutate(Province.State = toupper(str_sub(Province.State, -2,-1)))  %>% 
+    mutate_all(~replace(., is.na(.), 0)) %>%
+    filter(Province_State!="C.")  %>%
+    gather(Date, Confirmed, -Province_State, -Lat, -Long_) %>%
+    # convert Date column in right format
+    mutate(Date=substr(Date,2,8))%>% mutate(Date=mdy(Date)) %>%
+    # filter(Date<"2020-03-25")   %>%
+    filter(Confirmed>0) %>%  # remove the 0 from plotting
+    filter(Long_>-130 & Long_<0 & Lat > 20)  # focus on mainland USA
+  
+# usa <- map_data("usa")  
+
+ggplot() + geom_polygon(data=states, aes(x=long, y=lat, group = group),color="white",alpha=0.1) +
+    geom_point(data=dt1, aes(x=Long_, y=Lat, size =Confirmed, color=Confirmed, alpha =Confirmed)) +
+    scale_size(limits = c(1,1000),range = c(.1,10),guide_legend(title=""))+
+    scale_alpha_continuous(range=c(0.1,0.9),guide = FALSE) + # turn off legend
+    scale_color_viridis(limits = c(1,1000)) +
+    coord_fixed(1.3) +
+    theme_void() + coord_map() +
+    labs(title=paste0('美国新冠病毒分布图(更新至', max.date, ')')) +
+    guides(fill=FALSE) + # do this to leave off the color legend
+    theme(
+        text = element_text(color = "#22211d"),
+        plot.title = element_text(size= 16, hjust=0.5, color = "#4e4d47", margin = margin(b = 0.1, t = 0.4, l = 2, unit = "cm")),
+    ) +
+    guides(fill=FALSE)  # do this to leave off the color legend
+
+```
+## US Map with leaflet
+
+```{r}
+library("htmltools")
+library(leaflet)
+
+addLabel <- function(dt1) {
+    data$label <- paste0(
+        '<b>', ifelse(is.na(data$`Province_State`), data$`Province_State`), '</b><br>
+    <table style="width:120px;">
+    <tr><td>Confirmed:</td><td align="right">', dt1$Confirmed, '</td></tr>
+    # <tr><td>Deceased:</td><td align="right">', dt1$deceased, '</td></tr>
+    # <tr><td>Estimated Recoveries:</td><td align="right">', data$recovered, '</td></tr>
+    # <tr><td>Active:</td><td align="right">', data$active, '</td></tr>
+    </table>'
+    )
+    data$label <- lapply(data$label, HTML)
+
+    return(data)
+}
+
+leaflet() %>%
+    setMaxBounds(-180, -90, 180, 90) %>%
+    setView(0, 20, zoom = 2) %>%
+    addTiles() %>%
+    addProviderTiles(providers$CartoDB.Positron, group = "Light") %>%
+    addProviderTiles(providers$HERE.satelliteDay, group = "Satellite") %>%
+    # addLayersControl(
+    #     baseGroups    = c("Light", "Satellite"),
+    #     overlayGroups = c("Confirmed", "Confirmed (per capita)", "Estimated Recoveries", "Deceased", "Active", "Active (per capita)")
+    # ) %>%
+    # hideGroup("Confirmed (per capita)") %>%
+    # hideGroup("Estimated Recoveries") %>%
+    # hideGroup("Deceased") %>%
+    # hideGroup("Active") %>%
+    # hideGroup("Active (per capita)") %>%
+    addEasyButton(easyButton(
+        icon    = "glyphicon glyphicon-globe", title = "Reset zoom",
+        onClick = JS("function(btn, map){ map.setView([20, 0], 2); }"))) %>%
+    addEasyButton(easyButton(
+        icon    = "glyphicon glyphicon-map-marker", title = "Locate Me",
+        onClick = JS("function(btn, map){ map.locate({setView: true, maxZoom: 6}); }"))) %>%
+                  clearMarkers() %>%
+        addCircleMarkers(
+            lng          = ~dt1$Long,
+            lat          = ~dt1$Lat,
+            radius       = ~log(dt1$Confirmed),
+            stroke       = FALSE,
+            fillOpacity  = 0.5,
+            label        = ~label,
+            labelOptions = labelOptions(textsize = 15),
+            group        = "Confirmed"
+        )
+```
+
+
+## US State Data Line Plot
+
+```{r us_state_line}
+library(ggrepel)
+us_top_line <- dt1 %>%
+    select(c(Province_State, Date, Confirmed)) %>%
+    mutate(Province_State=ifelse(Province_State %in% top_state, as.character(Province_State), 'Others')) %>%
+    mutate(Province_State=Province_State %>% factor(levels=c(top_state))) %>%
+    filter(Date > "2020-03-01") %>%
+    group_by(Province_State, Date) %>% 
+    summarise(Confirmed = sum(Confirmed)) %>%
+    mutate(label = if_else(Date == max(Date), as.character(Province_State), NA_character_)) 
+
+ggplot(us_top_line, aes(x=Date, y=Confirmed, group=Province_State)) +
+    geom_line(aes(color=Province_State)) +
+    
+    theme_bw() +
+    labs(title=paste0('美国新冠病毒前10名州(更新至', max.date, ')')) +
+    coord_cartesian(xlim = c(as.Date("2020-03-01"), max(us_top_line$Date) + days(20))) +
+    scale_color_viridis() +
+    geom_label_repel(aes(label = label),
+                     nudge_x = 20,
+                     #direction = 'both',
+                     na.rm = TRUE) +
+    scale_color_discrete(guide = FALSE)  +
+    theme(
+        text = element_text(color = "#22211d"),
+        plot.title = element_text(size= 16, hjust=0.5, color = "#4e4d47", margin = margin(b = 0.4, t = 0.4, l = 2, unit = "cm")),
+        ) 
+# geom_point(aes(color=Province_State))
+
+```
+
+
+## US Case - googleVis
+
+```{r usmap,eval = FALSE, echo=FALSE}
+# plot with googleVis
+# sth is not right ???
+
+dt <- dt1 %>% select(-c(Lat, Long_, Date))  %>% 
+    group_by(Province_State) %>% summarise(Confirmed=sum(Confirmed))
+
+GeoStates <- gvisGeoChart(dt, "Province_State", "Confirmed",
+                          options=list(region="US",
+                                       displayMode="regions",
+                                       resolution="provinces",
+                                       width=800, height=600)
+                          )
+plot(GeoStates)
+  
+```
+
+## US Animate
+
+
+```{r usa_animate,  dpi=400}
+library(gapminder)
+library(animation)
+library(patchwork)
+# library(patchwork)
+
+n.col <- ncol(data_usa)
+# Create breaks for the color scale
+mybreaks <- c(2, 10, 40, 100)
+
+# Get the world polygon and extract US
+states <- map_data("state")
+
+dt1 <- data_usa %>% select(-c(UID,iso2,iso3,code3,FIPS,Admin2,Country_Region,Combined_Key))  %>% 
+    # filter(!str_detect(Province.State, "\\,")) %>% 
+    # mutate(Province.State = toupper(str_sub(Province_State, -2,-1)))  %>%   # using city data
+    mutate_all(~replace(., is.na(.), 0)) %>%
+    filter(Province_State!="C.")  %>%
+    gather(Date, Confirmed, -Province_State, -Lat, -Long_) %>%
+    # convert Date column in right format
+    mutate(Date=substr(Date,2,8))%>% mutate(Date=mdy(Date)) %>%
+    # filter(Date>"2020-02-01") %>% 
+    filter(Confirmed>0) %>%  # remove the 0
+    filter(Long_>-130 & Long_<0 & Lat > 20)  #remove outlier in long and lat
+
+usa <- map_data("usa")
+  
+ani.options(
+    convert = shQuote('C:/Program Files (x86)/ImageMagick-6.8.1-Q16/convert.exe')
+)
+  
+saveGIF(
+{
+    start_date <- min.date
+    while (start_date <= max.date)
+    {
+        dt <- dt1 %>% filter(Date <= start_date)
+        
+        p1 <- ggplot() + geom_polygon(data=states, aes(x=long, y=lat, group = group),color="white",alpha=0.2) +coord_fixed(1.5)+
+            geom_point(data=dt, aes(x=Long_, y=Lat, size =Confirmed, color=Confirmed, alpha =Confirmed)) +
+            scale_size(limits = c(1,500),range = c(.5,10),guide_legend(title=""))+
+            scale_alpha_continuous(range=c(0.2,0.4),guide = FALSE) + # turn off legend
+            scale_color_viridis(limits = c(1,500)) +
+            coord_fixed(1.3) +
+            theme_void() + coord_map() +
+            labs(title=paste0('美国新冠病毒动态分布图- Date ', start_date)) +
+            guides(fill=FALSE) + # do this to leave off the color legend
+            theme(
+                text = element_text(color = "#22211d"),
+                plot.title = element_text(size= 16, hjust=0.5, color = "#4e4d47", margin = margin(b = 0.1, t = 0.4, l = 2, unit = "cm")),
+                ) +
+            guides(fill=FALSE)  # do this to leave off the color legend
+        
+        dt %>% group_by(Date) %>% 
+            summarise(Confirmed = sum(Confirmed))  %>%
+            ungroup()
+        
+        p2 <- ggplot(dt, aes(x = Date, y = Confirmed)) +
+            geom_col() +
+            scale_fill_manual(values = c("#b2d1e0","gold")) +
+            scale_x_date(limits = c(as.Date(min.date), as.Date(max.date+1)), expand = c(0,0)) +
+            scale_y_continuous(expand = c(0,0)) +
+            labs(x = "Date", y = "Confirmed") +
+            theme(legend.position = "none",
+                  panel.grid.major = element_blank(),
+                  panel.grid.minor = element_blank(),
+                  panel.background = element_rect(fill = "grey99", colour = "grey80"),
+                  plot.title = element_text(hjust = 0.5))
+        
+        # p3 <- ggplot(data = NULL, aes(x = as.Date(min.date):as.Date(start_date), y = 1)) +
+        #  geom_line() +
+        #    
+        #    geom_point(aes(fill = start_date), shape = 21, size = 5) +
+        #  scale_x_continuous(limits = as.Date(c(min.date,max.date)))+
+        #  #theme_void() +
+        #  theme(legend.position = "none") +
+        #   
+        #  #scale_fill_manual(values = c("#b2d1e0","gold")) +
+        #  geom_text(x = start_date, y = 1, label = "test", size = 300, color="red") +
+        #   # annotate(geom="text", x= start_date, y=1, label="Scatter plot",   color="red") +
+        #  theme(panel.background = element_rect(fill = "grey99", colour = "grey80"))
+        
+        start_date <- start_date + 1 
+        # plot(p3)
+        # Print plots using patchwork
+        grid.arrange(p1, p2, ncol=1)
+        # print(p1 + p2  + plot_layout(ncol = 1, heights = c(5, 1)))
+    }
+},
+movie.name = "test.gif", 
+interval = 1, 
+ani.width = 900, 
+ani.height = 900,
+outdir = getwd()
+)
+
+# animate(p,fps = 1, width = 900, height = 900, renderer = gifski_renderer())
+# anim_save("output.gif")
+
+```
+
+## West Coast
+
+```{r westCoast,dev="png", dpi=400}
+states <- map_data("state")
+# Create breaks for the color scale
+mybreaks <- c(2, 10, 40, 100)
+
+west_coast <- subset(states, region %in% c("california", "oregon", "washington"))
+dt2 <- dt1 %>% filter(Long_> min(west_coast$long) & Long_ < max(west_coast$long) & Lat < max(west_coast$lat) & Lat > min(west_coast$lat))
+ggplot(data = west_coast) + 
+    geom_polygon(aes(x = long, y = lat, group = group), fill = "black", color = "white",alpha=0.1) + 
+    geom_point(data=dt2, aes(x=Long_, y=Lat, size =Confirmed, color=Confirmed, alpha=Confirmed)) +
+    scale_size_continuous(name="Counts", range=c(1,12), breaks=mybreaks) +
+    scale_alpha_continuous(name="Counts", range=c(0.1, .3), breaks=mybreaks) +
+    scale_color_viridis(option="magma", breaks=mybreaks, name="Counts" ) +
+    guides(size=guide_legend("Counts")) +
+    scale_color_viridis() +
+    coord_fixed(1.3) +
+    theme_void() + coord_map() +
+    labs(title=paste0('美国西海岸(更新至', max.date, ')')) +
+    guides(fill=FALSE) + # do this to leave off the color legend
+    theme(
+        text = element_text(color = "#22211d"),
+        legend.key = element_rect(fill=NA, color = NA),
+        plot.title = element_text(size= 16, hjust=0.8, color = "#4e4d47", margin = margin(b = 0.1, t = 0.4, l = 2, unit = "cm")),
+        )
+
+```
+
+## California
+
+```{r la,dev="png", dpi=400}
+
+states <- map_data("state")
+# Create breaks for the color scale
+mybreaks <- c(2, 10, 50, 100)
+
+# california state
+ca <- subset(states, region %in% c("california"))
+dt_ca <- dt1 %>% filter(Long_> min(ca$long) & Long_ < max(ca$long) & Lat < max(ca$lat) & Lat > min(ca$lat))
+
+ggplot(data = ca) + 
+    geom_polygon(aes(x = long, y = lat, group = group), fill = "black", color = "white",alpha=0.1) + 
+    geom_point(data=dt_ca, aes(x=Long_, y=Lat, size =Confirmed, color=Confirmed, alpha=Confirmed)) +
+    scale_size_continuous(name="Counts", range=c(1,8), breaks=mybreaks) +
+    scale_alpha_continuous(name="Counts", range=c(0.1, .5), breaks=mybreaks) +
+    scale_color_viridis(option="magma", breaks=mybreaks, name="Counts" ) +
+    guides(size=guide_legend("Counts")) +
+    # mark rancho
+    geom_circle(aes(x0 = -117.6, y0 = 34.13, r=0.1, fill="red", alpha=0.9),color="red", data = dt_ca)+
+    coord_fixed(1) +
+    # scale_color_viridis() +
+    theme_void() + coord_map() +
+    labs(title=paste0('美国加州(更新至', max.date, ')')) +
+    guides(fill=FALSE) + # do this to leave off the color legend
+    theme(
+        text = element_text(color = "#22211d"),
+        legend.key = element_rect(fill=NA, color = "white"),
+        plot.title = element_text(size= 16, hjust=0.5, color = "#4e4d47", margin = margin(b = 0.1, t = 0.4, l = 2, unit = "cm")),
+        )
+
+```
+
+## Greater LA Area
+
+```{r, dev="png", dpi=400}
+library(ggforce)
+require("ggrepel")
+# get couty data
+counties <- map_data("county")
+
+# Create breaks for the color scale
+mybreaks <- c(1,5, 50)
+
+# pick LA county
+la <-　counties  %>% 
+    filter(region=="california" & subregion %in% c("los angeles", "san bernardino", "riverside","san diego", "orange","kern","ventura","santa barbara","imperial"))
+
+dt_la <- dt1 %>% filter(Long_> min(la$long) & Long_ < max(la$long) & Lat < max(la$lat) & Lat > min(la$lat))
+
+ggplot(data = la) + 
+    geom_polygon(aes(x = long, y = lat, group = group), fill = "black", color = "white",alpha=0.1) + 
+    geom_point(data=dt_la, aes(x=Long_, y=Lat, size =Confirmed, color=Confirmed, alpha=Confirmed)) +
+    #geom_text_repel(data=dt_la,aes(x=Long, y=Lat,label=Confirmed, size=6)) + 
+    scale_size_continuous(name="Counts", range=c(1,12), breaks=mybreaks) +
+    scale_alpha_continuous(name="Counts", range=c(0.1, .9), breaks=mybreaks) +
+    scale_color_viridis(option="magma", breaks=mybreaks, name="Counts" ) +
+    guides(size=guide_legend("Counts")) +
+    # scale_color_viridis() +
+    # mark rancho
+    geom_circle(aes(x0 = -117.6, y0 = 34.13, r=0.05, fill="red", alpha=0.2),color="red", data = dt_la)+
+    coord_fixed() +
+    theme_void() + coord_map() +
+    labs(title='洛杉矶大区') +
+    guides(fill=FALSE) + # do this to leave off the color legend
+    theme(
+        text = element_text(color = "#22211d"),
+        legend.key = element_rect(fill=NA, color = NA),
+        plot.title = element_text(size= 16, hjust=0.5, color = "#4e4d47", margin = margin(b = 0.1, t = 0.4, l = 2, unit = "cm")),
+        )
+
+```
+
+
+
+## Cases for the Whole World
+
+The raw data provide the daily number of cases in every country. They are aggregated below to derive the
+daily stats of the whole world.
+
+```{r}
+## counts for the whole world
+data.world <- data %>% group_by(date) %>%
+    summarise(country='World',
+              confirmed = sum(confirmed),
+    deaths = sum(deaths),
+    recovered = sum(recovered))
+data %<>% rbind(data.world)
+## remaining confirmed cases
+data %<>% mutate(remaining.confirmed = confirmed - deaths - recovered)
+
+```
+
+## Daily Increases and Death Rates
+
+After that, the daily increases of death and cured cases and the death rates are calculated.
+
+*rate.upper* is caculated with the total dead and cured cases. It is the upper bound of death rate and the
+reasons are
+1) there were much more deaths than cured cases when the coronavirus broke out and when it was not
+contained, and 
+2) the daily number of death will decrease and that of cured will increase as it becomes contained and
+more effective measures and treatments are used.
+*rate.lower* is caculated with total dead and confirmed cases. It is a lower bound of death rate, because
+there are and will be new deaths from the current confirmed cases. The final death rate is expected to be in
+between of the above two rates.
+rate.daily is caculated with the daily dead and cured cases and therefore is more volatile than the above
+two. However, it can give us a clue of the current situlation: whether it is very serious or is getting better.
+
+```{r}
+# sort by country and date
+data %<>% arrange(country, date)
+# daily increases of deaths and cured cases
+# set NA to the increases on day1
+n <- nrow(data)
+day1 <- min(data$date)
+data %<>% mutate(confirmed.inc = ifelse(date == day1, NA, confirmed - lag(confirmed, n=1)),
+deaths.inc = ifelse(date == day1, NA, deaths - lag(deaths, n=1)),
+recovered.inc = ifelse(date == day1, NA, recovered - lag(recovered, n=1)))
+# death rate based on total deaths and cured cases
+data %<>% mutate(rate.upper = (100 * deaths / (deaths + recovered)) %>% round(1))
+# lower bound: death rate based on total confirmed cases
+data %<>% mutate(rate.lower = (100 * deaths / confirmed) %>% round(1))
+# death rate based on the number of death/cured on every single day
+data %<>% mutate(rate.daily = (100 * deaths.inc / (deaths.inc + recovered.inc)) %>% round(1))
+  
+```
+
+# Visualisation
+
+After tidying up the data, we visualise it with various charts.
+
+## Top 10 countries with most confirmed cases
+
+The area plots show the numbers of dead, cured, current confirmed and suspected cases. Note that,
+in the area plot, the total number of confirmed cases is represented by the total areas of confirmed, cured and
+dead.
+
+```{r}
+# ranking by confirmed cases
+data.latest <- data %>% filter(date == max(date)) %>%
+    select(country, date, confirmed, deaths, recovered, remaining.confirmed) %>%
+    mutate(ranking = dense_rank(desc(confirmed)))
+# top 10 countries: 12 incl. 'World' and 'Others'
+top.countries <- data.latest %>% filter(ranking <= 12) %>%
+    arrange(ranking) %>% pull(country) %>% as.character()
+# move 'Others' to the end
+top.countries %<>% setdiff('Others') %>% c('Others')
+
+```
+
+    Top countries in order: `r top.countries`.
+
+
+## World Map with Googlevis
+
+```{r　world_map, eval = FALSE}
+library(googleVis)
+    data_map <- data.latest %>% 
+    mutate(country = case_when(country %in% c("Mainland China", "Macau", "Hong Kong SAR", "Taipei and environs") ~ "China", 
+        country == "US" ~ "United States", 
+        country == "UK" ~ "United Kingdom", 
+        TRUE ~ as.character(country)))   %>%
+            filter(country!='World' ) %>% #& country!="China") %>%
+            group_by(country) %>% 
+            summarise(positive = sum(confirmed)) %>%
+            ungroup() #%>% 
+    Geo=gvisGeoChart(data_map, locationvar="country", 
+        colorvar="positive",
+        options=list(projection="kavrayskiy-vii"
+        ))
+    plot(Geo)
+T <- gvisTable(data_map, 
+    options=list(width=220, height=300))
+
+GT <- gvisMerge(Geo,T, horizontal=TRUE) 
+plot(GT)
+
+```
+
+
+## World Maphttp://ess.r-project.org/Manual/ess.html#Installing-from-source
+
+
+```{r world, dev="png", dpi=400}
+
+require(maps)
+require(viridis)
+# Create breaks for the color scale
+mybreaks <- c(10, 50, 100, 5000)
+# data preparation
+data_world <- data.confirmed.world_orig   %>%  
+    rename(Province = 'Province.State', Country = 'Country.Region') %>% 
+    gather(Date, Confirmed, -Province, -Country, -Lat, -Long) %>% 
+    mutate(Country = case_when(Country %in% c("Mainland China", "Macau", "Hong Kong SAR", "Taipei and environs") ~ "China", 
+                               Country == "US" ~ "United States", 
+                               Country == "UK" ~ "United Kingdom", 
+                               TRUE ~ as.character(Country))) %>%
+    # Reorder data to show biggest cities on top  
+    arrange(Country)  %>%
+    mutate(Country=factor(Country,unique(Country)))  %>%
+    filter(Long>-150)
+
+world_map <- map_data("world")
+ggplot() + geom_polygon(data=world_map, aes(x=long, y=lat, group = group),color="white",alpha=0.1) +coord_fixed(1.3) +
+    geom_point(data=data_world, aes(x=Long, y=Lat, size =Confirmed, color=Confirmed,alpha=Confirmed )) +
+    scale_size(limits = c(1,5000),range = c(.1,10),guide_legend(title=""))+
+    scale_alpha_continuous(range=c(0.1,0.4),guide = FALSE) + # turn off legend
+    scale_color_viridis(limits = c(1,1000)) +
+    
+    # scale_size_continuous(name="Counts", trans="log2", range=c(.5,5), breaks=mybreaks) +
+    # scale_alpha_continuous(name="Counts", range=c(0.2, .5), breaks=mybreaks) +
+    # scale_color_viridis(option="magma",  name="Counts" ) +
+    guides(size=guide_legend("Counts")) +
+    scale_color_viridis() +
+    coord_fixed(1.3) +
+    theme_void() +
+    labs(title=paste0('全球新冠病毒分布图(更新至', max.date, ')')) +
+    guides(fill=FALSE) + # do this to leave off the color legend
+    theme(
+        text = element_text(color = "#22211d"),
+        plot.title = element_text(size= 16, hjust=0.5, color = "#4e4d47", margin = margin(b = 0.1, t = 0.4, l = 2, unit = "cm")),
+        )
+```
+
+## World Map Leaflet http://ess.r-project.org/Manual/ess.html#Installing-from-source
+
+
+```{r world, dev="png", dpi=400}
+
+require(leaflet)
+require(viridis)
+# Create breaks for the color scale
+mybreaks <- c(10, 50, 100, 5000)
+
+p <- mapout <- leaflet_static <- leaflet() %>% addProviderTiles(providers$ CartoDB.Positron) %>%
+       setView(0,0, 2)
+p
+# data preparation
+data_world <- data.confirmed.world_orig   %>%  
+    rename(Province = 'Province.State', Country = 'Country.Region') %>% 
+    gather(Date, Confirmed, -Province, -Country, -Lat, -Long) %>% 
+    mutate(Country = case_when(Country %in% c("Mainland China", "Macau", "Hong Kong SAR", "Taipei and environs") ~ "China", 
+                               Country == "US" ~ "United States", 
+                               Country == "UK" ~ "United Kingdom", 
+                               TRUE ~ as.character(Country))) %>%
+    # Reorder data to show biggest cities on top  
+    arrange(Country)  %>%
+    mutate(Country=factor(Country,unique(Country)))  %>%
+    filter(Long>-150)
+
+world_map <- map_data("world")
+ggplot() + #geom_polygon(data=world_map, aes(x=long, y=lat, group = group),color="white",alpha=0.1) +coord_fixed(1.3) +
+    geom_point(data=data_world, aes(x=Long, y=Lat, size =Confirmed, color=Confirmed,alpha=Confirmed )) +
+    scale_size(limits = c(1,5000),range = c(.1,10),guide_legend(title=""))+
+    scale_alpha_continuous(range=c(0.1,0.4),guide = FALSE) + # turn off legend
+    scale_color_viridis(limits = c(1,1000)) +
+    
+    # scale_size_continuous(name="Counts", trans="log2", range=c(.5,5), breaks=mybreaks) +
+    # scale_alpha_continuous(name="Counts", range=c(0.2, .5), breaks=mybreaks) +
+    # scale_color_viridis(option="magma",  name="Counts" ) +
+    guides(size=guide_legend("Counts")) +
+    scale_color_viridis() +
+    coord_fixed(1.3) +
+    theme_void() +
+    labs(title=paste0('全球新冠病毒分布图(更新至', max.date, ')')) +
+    guides(fill=FALSE) + # do this to leave off the color legend
+    theme(
+        text = element_text(color = "#22211d"),
+        plot.title = element_text(size= 16, hjust=0.5, color = "#4e4d47", margin = margin(b = 0.1, t = 0.4, l = 2, unit = "cm")),
+        )
+```
+
+### Pie Chart
+
+```{r pietu, dev="png", dpi=400}
+# a <- data %>% group_by(country) %>% tally()
+# put all others in a single group of 'Others'
+df <- data.latest %>% filter(!is.na(country) & country!='World') %>%
+    mutate(country=ifelse(ranking <= 12, as.character(country), 'Others')) %>%
+    mutate(country=country %>% factor(levels=c(top.countries)))
+df %<>% group_by(country) %>% summarise(confirmed=sum(confirmed))
+## precentage and label
+df %<>% mutate(per = (100*confirmed/sum(confirmed)) %>% round(1)) %>%
+    mutate(txt = paste0(country, ': ', confirmed, ' (', per, '%)'))
+# pie(df$confirmed, labels=df$txt, cex=0.7)
+df %>% ggplot(aes(fill=country)) +
+    geom_bar(aes(x='', y=per), stat='identity') +
+    coord_polar("y", start=0) +
+    xlab('') + ylab('Percentage (%)') +
+    labs(title=paste0('全球新冠病毒确诊人数前10名国家 (更新至', max.date, ')')) +
+  　scale_fill_brewer(palette="Spectral",name='Country', labels=df$txt) +
+    theme(
+        text = element_text(color = "#22211d"),
+        plot.title = element_text(size= 16, hjust=-0.2, color = "#4e4d47", margin = margin(b = 0.3 , t = 0.4, l = 2, unit = "cm")),
+    )
+```
+
+### Other plots
+
+```{r allinone, dev="png", dpi=400}
+# convert from wide to long format, for purpose of drawing a area plot
+data.long <- data %>% select(c(country, date, confirmed, remaining.confirmed, recovered, deaths)) %>%
+  gather(key=type, value=count, -c(country, date))
+## set factor levels to show them in a desirable order
+data.long %<>% mutate(type = factor(type, c('confirmed', 'remaining.confirmed', 'recovered', 'deaths')))
+## cases by type
+df <- data.long %>% filter(country %in% top.countries) %<>%
+    mutate(country=country %>% factor(levels=c(top.countries)))
+levels(df$type) <- c("确诊人数","剩余确诊人数","康复人数","死亡人数")
+df %>% filter(country != 'World') %>%
+    ggplot(aes(x=date, y=count, fill=country)) +
+    scale_fill_brewer(palette="Spectral") +
+    theme_classic() +
+    # scale_fill_hue(l=40)+  
+    labs(title=paste0('全球数据（包括中国, 更新至', max.date, ')')) +
+    theme(plot.title = element_text(hjust = 0.5)) +
+    geom_area() + xlab('时间') + ylab('人数') +
+    theme(legend.title=element_blank()) +
+    facet_wrap(~type, ncol=2, scales='free_y')
+#+scale_color_gradientn(colours = rainbow(5))
+
+```
+
+
+```{r noChina, dev="png", dpi=400}
+# excluding Mainland China
+df %>% filter(!(country %in% c('World', 'China'))) %>%
+    filter(date>"2020-02-25")  %>% # after certain date
+    ggplot(aes(x=date, y=count, fill=country)) +
+    theme_bw() +
+    scale_fill_brewer(palette="Spectral")+
+    geom_area() + 
+    xlab('时间') + ylab('人数') +
+    labs(title=paste0('全球数据（不包括中国,更新至', max.date, ')')) + 
+    theme(plot.title = element_text(hjust = 0.5)) +
+    theme(legend.title=element_blank()) +
+    facet_wrap(~type, ncol=2, scales='free_y')
+
+```
+
+
+```{r all, dev="png", dpi=400}
+# if Australia in not in top 10, add it in and remove 'Others'
+if(!('Australia' %in% top.countries)) {
+    top.countries %<>% setdiff('Others') %>% c('Australia')
+    df <- data.long %>% filter(country %in% top.countries) %<>%
+    mutate(country=country %>% factor(levels=c(top.countries)))
+}
+#levels(df$type) <- c("确诊人数","剩余确诊人数","康复人数","死亡人数")
+## cases by country
+df %>% filter(type != 'confirmed') %>%
+    ggplot(aes(x=date, y=count, fill=type)) +
+    theme_bw() +
+    geom_area() + 
+    xlab('时间') + ylab('人数') +
+    labs(title=paste0('世界各国新冠病毒病例数据统计 (', max.date, ')')) +
+    theme(plot.title = element_text(hjust = 0.5)) +
+    scale_fill_brewer(palette="Set1")+
+    # scale_fill_manual(values=c('blue',"orange", 'green', 'red')) +
+    theme(legend.title=element_blank(), legend.position='bottom') +
+    facet_wrap(~country, ncol=3, scales='free_y')
+
+```
+
+From the above figure (based on official stats), the coronavirus seems to be under control in China, with an
+increase of recovered cases (in green) every day and a shrinking of the remaining confrimed cases (in red).
+However, in the rest of the world (i.e., outside of China), the confirmed cases are surging up in many other
+countries, which suggests that the virus has broken out there.
+
+
+## Current (or Remaining) Confirmed Cases
+
+Now we focuse on all cases world wide.
+
+```{r,  dev="png", dpi=400}
+# data %<>% filter(country=='Mainland China')
+# data %<>% filter(country=='Australia')
+data %<>% filter(country=='World')
+n <- nrow(data)
+# current confirmed and its increase
+plot1 <- ggplot(data, aes(x=date, y=remaining.confirmed)) +
+    geom_point() + geom_smooth(method = "loess", formula = y ~ x) +
+    xlab('Date') + ylab('Count') + labs(title='Current Confirmed Cases')
+plot2 <- ggplot(data, aes(x=date, y=confirmed.inc)) +
+    geom_point() + geom_smooth(method = "loess", formula = y ~ x) +
+    xlab('Date') + ylab('Count') + labs(title='Increase in Current Confirmed')
+# + ylim(0, 4500)
+grid.arrange(plot1, plot2, ncol=2)
+#+ stat_smooth(method = "loess", formula = y ~ x, size = 1)
+```
+
+##  Deaths and Cured Cases
+
+```{r, dev="png", dpi=400}
+# a scatter plot with a smoothed line and vertical x-axis labels
+plot1 <- ggplot(data, aes(x=date, y=deaths)) +
+    geom_point() + geom_smooth(method = "loess", formula = y ~ x) +
+    xlab('Date') + ylab('Count') + labs(title='Deaths')
+plot2 <- ggplot(data, aes(x=date, y=recovered)) +
+    geom_point() + geom_smooth(method = "loess", formula = y ~ x) +
+    xlab('Date') + ylab('Count') + labs(title='Recovered Cases')
+plot3 <- ggplot(data, aes(x=date, y=deaths.inc)) +
+    geom_point() + geom_smooth(method = "loess", formula = y ~ x) +
+    xlab('Date') + ylab('Count') + labs(title='Increase in Deaths')
+plot4 <- ggplot(data, aes(x=date, y=recovered.inc)) +
+    geom_point() + geom_smooth(method = "loess", formula = y ~ x) +
+    xlab('Date') + ylab('Count') + labs(title='Increase in Recovered Cases')
+```
+
+
+```{r}
+## show four plots together, with 2 plots in each row
+grid.arrange(plot1, plot2, plot3, plot4, nrow=2)
+
+```
+
+## Death Rates
+
+Below are death rates caculated in three different ways. See Section 3.3 for the details of caculating the three
+rates.
+In the right chart, the upper bound (in blue) is decreasing, as there will be more cured cases and fewer dead
+ones daily as time goes. However, the lower bound (in green) keeps going up, as there are and will be new
+deaths from the current confirmed cases. Therefore, the final death rate is expected to be in between of those
+two rates. According to the latest data retrieved today (10 March 2020), those two rates are respectively
+6% and 3.5% (see the last row in the table at the end of this report), and therefore the final death rate is
+expected to be around 4-5%.
+A surge in the daily death rate (in red) suggests that the situlation is changing (actually, getting worse), and
+a possible reason is the outbreak of coronavirus Italy and Iran.
+
+```{r, dev="png", dpi=400}
+
+# three death rates
+plot1 <- ggplot(data, aes(x=date)) +
+    geom_line(aes(y=rate.upper, colour='Upper bound')) +
+    geom_line(aes(y=rate.lower, colour='Lower bound')) +
+    geom_line(aes(y=rate.daily, colour='Daily')) +
+    xlab('Date') + ylab('Death Rate (%)') + labs(title='Overall') +
+    theme(legend.position='bottom', legend.title=element_blank()) +
+    ylim(0, 90)
+# focusing on last 2 weeks
+plot2 <- ggplot(data[n-(14:0),], aes(x=date)) +
+    geom_line(aes(y=rate.upper, colour='Upper bound')) +
+    geom_line(aes(y=rate.lower, colour='Lower bound')) +
+    geom_line(aes(y=rate.daily, colour='Daily')) +
+    xlab('Date') + ylab('Death Rate (%)') + labs(title='Last two weeks') +
+    theme(legend.position='bottom', legend.title=element_blank()) +
+    ylim(0, 10)
+grid.arrange(plot1, plot2, ncol=2)
+
+```
+
+# Processed Data
+
+Blow is the processed data for this analysis and visualisation.
+
+```{r}
+
+# re-order columns
+# deadIncr, curedIncr,
+data %<>% select(c(date, confirmed, deaths, recovered, remaining.confirmed,
+                   confirmed.inc, deaths.inc, recovered.inc, rate.upper, rate.daily, rate.lower))
+# to make column names shorter for output purpose only
+names(data) %<>% gsub(pattern='Count', replacement='')
+# output as a table
+data %>% kable("latex", booktabs=T, longtable=T, caption="Cases in the Whole World",
+               format.args=list(big.mark=",")) %>%
+    kable_styling(font_size=5, latex_options = c("striped", "hold_position", "repeat_header"))
+
+```
+
+
+```{r}
+data.latest %>% arrange(desc(confirmed)) %>%
+    select(-ranking) %>% filter(country!='Others') %>%
+    kable("latex", booktabs=T, longtable=T, row.names=T, caption="Cases by Country",
+          format.args=list(big.mark=",")) %>%
+    kable_styling(font_size=7, latex_options = c("striped", "hold_position", "repeat_header"))
+
+```
+
+
+
+
